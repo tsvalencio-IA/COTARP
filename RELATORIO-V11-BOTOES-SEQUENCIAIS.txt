@@ -1,0 +1,22 @@
+SOS ORÇAMENTOS IA — V11
+
+CORREÇÃO SOLICITADA
+- O botão "+ Nova peça" permanece sempre visível logo abaixo da última peça cadastrada.
+- O botão "+ Novo serviço" permanece sempre visível logo abaixo do último serviço cadastrado.
+- Os botões não dependem de a linha estar completa.
+- Ao tocar, o sistema cria o próximo lançamento, rola automaticamente até ele e posiciona o cursor na descrição.
+- Se a última linha estiver totalmente vazia, o sistema reaproveita a própria linha e não cria duplicação vazia.
+- Os botões superiores originais foram preservados.
+
+ARQUIVOS FUNCIONALMENTE ALTERADOS
+- index.html
+- sw.js (somente atualização do cache PWA para V11)
+
+VALIDAÇÕES
+- JavaScript inline aprovado em node --check.
+- sw.js e js/comparador.js aprovados em node --check.
+- Fluxo validado em 1366 px, 900 px, 390 px e 320 px.
+- Sem estouro horizontal nas quatro larguras.
+- Botões testados com lançamento incompleto.
+- Criação e foco automático do próximo item testados para peças e serviços.
+- Cenário com 200 serviços testado: o botão permaneceu abaixo do serviço 200, criou o serviço 201 e focou sua descrição.

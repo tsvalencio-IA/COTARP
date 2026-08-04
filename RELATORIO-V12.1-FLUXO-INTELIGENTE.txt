@@ -1,0 +1,23 @@
+SOS ORÇAMENTOS IA — V12.1 FLUXO INTELIGENTE
+
+ALTERAÇÕES
+- Lista, fornecedores e tabela comparativa agora são minimizáveis/maximizáveis.
+- Cada fornecedor possui botão próprio Abrir/Minimizar.
+- Ao salvar um fornecedor, o cartão atual minimiza, o próximo abre e a tela rola automaticamente para ele.
+- Não é obrigatório preencher os três fornecedores.
+- Abaixo de cada fornecedor salvo aparecem ações: preencher próximo, analisar cotação, gerar PDF da comparação e abrir pedidos.
+- Barra rápida fica próxima do usuário durante a rolagem.
+- Pedidos de compra por fornecedor também podem ser minimizados.
+- Estados de abertura ficam salvos no navegador.
+- Cache PWA atualizado para 12.1.0.
+
+ARQUIVOS FUNCIONAIS ALTERADOS
+- index.html
+- js/comparador.js
+- css/comparador.css
+- sw.js
+
+PRESERVADO
+- interpretação e conferência dos preços;
+- comparação, destaques, PDFs e pedidos de compra;
+- orçamento, áudio, dados, preview e instalação PWA.
