@@ -1,5 +1,5 @@
 /*
-  Comparador de preços V12.2 — leitura fiel de fotos em alta resolução/recortes, áudio por fornecedor, fluxo inteligente, matriz visual com 3 fornecedores, PDF e reinício seguro.
+  Comparador de preços V12.2.1 — correção do limite Groq na leitura de fotos, leitura segmentada fiel, áudio por fornecedor, fluxo inteligente, matriz visual com 3 fornecedores, PDF e reinício seguro.
   Regra central: nenhum dado lido por IA entra na comparação antes da confirmação humana.
 */
 (function(){
@@ -670,10 +670,14 @@ ${kind==='TEXT'?`TEXTO REAL DO FORNECEDOR/ÁUDIO:\n${text}`:''}`;
       if(!res.ok)throw new Error(data.error?.message||`Erro Groq ${res.status}`);
       return data.choices?.[0]?.message?.content||'';
     },
-    async groqVision(prompt,dataUrls,key,maxTokens=2600){
+    async groqVision(prompt,dataUrls,key,maxTokens=440){
       const images=(Array.isArray(dataUrls)?dataUrls:[dataUrls]).filter(Boolean);
+      // O tier atual do modelo de visão limita a saída a 1000 tokens/minuto.
+      // Nunca permita que uma chamada isolada peça mais do que 900 tokens.
+      const requested=Math.floor(this.num(maxTokens)||440);
+      const safeTokens=Math.max(120,Math.min(900,requested));
       const payload={
-        model:this.getVisionModel(),temperature:0,max_completion_tokens:maxTokens,
+        model:this.getVisionModel(),temperature:0,max_completion_tokens:safeTokens,
         response_format:{type:'json_object'},reasoning_effort:'none',
         messages:[{role:'user',content:[{type:'text',text:prompt},...images.map(url=>({type:'image_url',image_url:{url}}))]}]
       };
@@ -724,19 +728,54 @@ ${kind==='TEXT'?`TEXTO REAL DO FORNECEDOR/ÁUDIO:\n${text}`:''}`;
     },
     async imageToVisionDataURLs(file){
       const img=await this.readImageFile(file);
-      const images=[this.renderImageDataURL(img,{maxSide:1800,quality:.92})];
-      // Fotos de tabelas perdem dígitos quando toda a página é reduzida.
-      // Enviamos também faixas horizontais sobrepostas em resolução maior.
-      if(img.height>=520){
-        const slices=3,overlap=Math.round(img.height*.06);
-        const base=Math.ceil(img.height/slices);
-        for(let i=0;i<slices;i++){
-          const y0=Math.max(0,i*base-overlap);
-          const y1=Math.min(img.height,(i+1)*base+overlap);
-          images.push(this.renderImageDataURL(img,{sx:0,sy:y0,sw:img.width,sh:y1-y0,maxSide:2200,quality:.95}));
-        }
+      // Uma única chamada com várias imagens estava gerando erro 400 e, na tentativa
+      // seguinte, o max_completion_tokens excedia o limite do tier da Groq.
+      // Agora dividimos a tabela em no máximo 2 faixas e enviamos UMA imagem por chamada.
+      if(img.height<560){
+        return [this.renderImageDataURL(img,{maxSide:2000,quality:.94})];
       }
-      return images;
+      const overlap=Math.round(img.height*.08);
+      const middle=Math.round(img.height/2);
+      const topEnd=Math.min(img.height,middle+overlap);
+      const bottomStart=Math.max(0,middle-overlap);
+      return [
+        this.renderImageDataURL(img,{sx:0,sy:0,sw:img.width,sh:topEnd,maxSide:2000,quality:.95}),
+        this.renderImageDataURL(img,{sx:0,sy:bottomStart,sw:img.width,sh:img.height-bottomStart,maxSide:2000,quality:.95})
+      ];
+    },
+    visionExtractionPrompt(part=1,total=1){
+      return `Leia SOMENTE a tabela automotiva visível nesta imagem${total>1?` (faixa ${part} de ${total})`:''}. Não use conhecimento externo e não adapte nomes à lista do orçamento.
+Para economizar a saída limitada da Groq, retorne SOMENTE este JSON compacto, sem markdown e sem espaços desnecessários:
+{"t":0,"r":[["codigo","denominacao","un","cod.fabr","marca",0,0,0,"A",""]]}
+Cada posição da linha significa, nesta ordem: código do fornecedor; denominação EXATAMENTE como aparece; unidade; código fabricante; marca; quantidade; preço unitário; valor total da linha; situação A=disponível, P=parcial, U=indisponível, ?=não informado; observação somente se algo estiver ilegível ou existir informação importante explícita.
+REGRAS: 1) uma linha física da tabela = um array; 2) não invente, não corrija e não complete; 3) copie códigos e números da MESMA linha; 4) use 0 ou "" quando não conseguir ler; 5) se houver preço e também texto explícito de indisponível, preserve o preço e use U; 6) não devolva rawLine nem campos extras; 7) não repita cabeçalho, TOTAL ou linhas que não sejam produto.`;
+    },
+    normalizeVisionCompact(parsed){
+      const rows=Array.isArray(parsed?.r)?parsed.r:(Array.isArray(parsed?.rows)?parsed.rows:[]);
+      return {
+        documentTotal:this.num(parsed?.t||parsed?.documentTotal),
+        documentExtra:0,
+        rows:rows.map(r=>{
+          const arr=Array.isArray(r)?r:null;
+          const supplierCode=arr?arr[0]:(r?.sc??r?.supplierCode??'');
+          const description=arr?arr[1]:(r?.d??r?.description??'');
+          const unit=arr?arr[2]:(r?.u??r?.unit??'');
+          const code=arr?arr[3]:(r?.c??r?.code??'');
+          const brand=arr?arr[4]:(r?.m??r?.brand??'');
+          const qtyRaw=arr?arr[5]:(r?.q??r?.qty);
+          const unitPrice=this.num(arr?arr[6]:(r?.pu??r?.unitPrice));
+          const totalPrice=this.num(arr?arr[7]:(r?.pt??r?.totalPrice));
+          const status=String(arr?arr[8]:(r?.a??r?.availability??'?')).trim().toUpperCase();
+          const availability=status==='U'||status==='UNAVAILABLE'?'unavailable':status==='P'||status==='PARTIAL'?'partial':status==='A'||status==='AVAILABLE'?'available':'unknown';
+          const note=arr?arr[9]:(r?.n??r?.note??'');
+          return {
+            supplierCode:String(supplierCode||'').trim(),description:String(description||'').trim(),unit:String(unit||'').trim(),code:String(code||'').trim(),brand:String(brand||'').trim(),
+            qty:this.num(qtyRaw),qtyShown:(qtyRaw!==undefined&&qtyRaw!==null&&String(qtyRaw)!==''),unitPrice,totalPrice,
+            priceType:unitPrice>0?'unit':totalPrice>0?'total':(availability==='unavailable'?'unavailable':'unknown'),value:unitPrice>0?unitPrice:totalPrice,
+            extra:0,availability,note:String(note||'').trim(),rawLine:''
+          };
+        })
+      };
     },
     normalizeDraft(raw){
       let priceType=['unit','total','unknown','unavailable'].includes(raw?.priceType)?raw.priceType:(raw?.availability==='unavailable'?'unavailable':'unknown');
@@ -822,49 +861,47 @@ ${kind==='TEXT'?`TEXTO REAL DO FORNECEDOR/ÁUDIO:\n${text}`:''}`;
       });
       return out;
     },
-    async readSupplierImageFile(file,key,id,index,total){
-      this.setSupplierBusy(id,true,total>1?`Lendo foto ${index+1} de ${total} em alta resolução...`:'Lendo a foto em alta resolução...');
-      let dataUrls=await this.imageToVisionDataURLs(file);
-      try{
-        const content=await this.groqVision(this.extractionPrompt('IMAGE'),dataUrls,key,3000);
-        return this.normalizeParsed(this.extractJSON(content),'image');
-      }catch(firstError){
-        const msg=String(firstError.message||'');
-        if([400,413,429].includes(firstError.status) || /too large|token limit|tokens per minute|requested|context|image count|too many images/i.test(msg)){
-          this.setSupplierBusy(id,true,'A foto excedeu o limite. Tentando leitura compacta sem perder a linha inteira...');
-          const compact=await this.imageToDataURL(file,1400,.86);
-          const content=await this.groqVision(this.extractionPrompt('IMAGE'),[compact],key,1800);
-          return this.normalizeParsed(this.extractJSON(content),'image');
+    async readSupplierImageFile(file,key,id){
+      const segments=await this.imageToVisionDataURLs(file);
+      const combined={rows:[],documentTotal:0,documentExtra:0};
+      for(let i=0;i<segments.length;i++){
+        this.setSupplierBusy(id,true,segments.length>1?`Lendo a foto com precisão — parte ${i+1} de ${segments.length}...`:'Lendo a foto com precisão...');
+        try{
+          // 2 partes x 440 tokens = no máximo 880 tokens solicitados, abaixo do limite de 1000 OTPM mostrado pela Groq.
+          const content=await this.groqVision(this.visionExtractionPrompt(i+1,segments.length),segments[i],key,440);
+          const parsed=this.normalizeVisionCompact(this.extractJSON(content));
+          combined.rows.push(...(parsed.rows||[]));
+          if(this.num(parsed.documentTotal)>0)combined.documentTotal=this.num(parsed.documentTotal);
+        }catch(err){
+          const msg=String(err?.message||'');
+          if(err?.status===429 || /tokens per minute|output tokens|rate limit|too large for model/i.test(msg)){
+            throw new Error('A Groq recusou a leitura por limite temporário do modelo de visão. A chamada já foi reduzida para menos de 1000 tokens; aguarde alguns segundos e tente esta mesma foto novamente.');
+          }
+          throw err;
         }
-        throw firstError;
       }
+      combined.rows=this.mergeImageRows(combined.rows);
+      return this.normalizeParsed(combined,'image');
     },
     async processSupplierImage(id,input){
-      const s=this.supplier(id),files=Array.from(input?.files||[]);if(!s||!files.length)return;
+      const s=this.supplier(id),file=input?.files?.[0];if(!s||!file)return;
       if(!this.state.requested.length){this.toast('Primeiro carregue a lista solicitada.');input.value='';return;}
       const key=this.getGroqKey();
       if(!key){this.toast('A chave Groq não está configurada. Nenhum dado foi incluído.');input.value='';return;}
-      s.imageName=files.map(f=>f.name).join(' | ');s.confirmed=false;s.offers=[];
+      s.imageName=file.name;s.confirmed=false;s.offers=[];
       if(this.imagePreviews[id]){try{URL.revokeObjectURL(this.imagePreviews[id]);}catch(e){}}
-      this.imagePreviews[id]=URL.createObjectURL(files[0]);
+      this.imagePreviews[id]=URL.createObjectURL(file);
       const preview=this.$(`supplierPreview_${id}`);
       if(preview){preview.src=this.imagePreviews[id];preview.classList.add('show');}
       try{
-        const combined={rows:[],documentTotal:0,documentExtra:0};
-        for(let i=0;i<files.length;i++){
-          const parsed=await this.readSupplierImageFile(files[i],key,id,i,files.length);
-          combined.rows.push(...(parsed.rows||[]));
-          if(this.num(parsed.documentTotal)>0)combined.documentTotal=this.num(parsed.documentTotal);
-          if(this.num(parsed.documentExtra)>0)combined.documentExtra=this.num(parsed.documentExtra);
-        }
-        combined.rows=this.mergeImageRows(combined.rows);
-        this.applyDraft(s,combined,'image');
-        this.toast(`${combined.rows.length} linha(s) lida(s) da(s) foto(s). Confira descrição, código, marca, quantidade e preços antes de salvar.`);
+        const parsed=await this.readSupplierImageFile(file,key,id);
+        this.applyDraft(s,parsed,'image');
+        this.toast(`${parsed.rows.length} linha(s) lida(s) da foto. Confira descrição, código, marca, quantidade e preços antes de salvar.`);
       }catch(e){
         console.error(e);
         s.draftOffers=[];s.confirmed=false;s.offers=[];
         this.renderAll();
-        this.toast('A foto não foi lida com segurança. Nenhum preço foi salvo. Use outra foto, áudio ou cole o texto.');
+        this.toast(e?.message||'A foto não foi lida com segurança. Nenhum preço foi salvo.');
       }finally{
         this.setSupplierBusy(id,false);input.value='';
       }
@@ -1283,8 +1320,8 @@ ${kind==='TEXT'?`TEXTO REAL DO FORNECEDOR/ÁUDIO:\n${text}`:''}`;
             <textarea id="supplierText_${s.id}" class="compare-source" placeholder="Cole somente o que este fornecedor respondeu. Pode ser apenas uma peça." oninput="Comparator.updateSupplier('${s.id}','responseText',this.value)">${this.esc(s.responseText||'')}</textarea>
             <div class="compare-simple-actions compare-read-actions">
               <button class="btn main" onclick="Comparator.processSupplierText('${s.id}')"><i class="fa-solid fa-wand-magic-sparkles"></i> Interpretar mensagem</button>
-              <label class="btn line" for="supplierImage_${s.id}"><i class="fa-solid fa-camera"></i> Ler foto(s)</label>
-              <input id="supplierImage_${s.id}" class="compare-file" type="file" accept="image/*" multiple onchange="Comparator.processSupplierImage('${s.id}',this)">
+              <label class="btn line" for="supplierImage_${s.id}"><i class="fa-solid fa-camera"></i> Ler foto</label>
+              <input id="supplierImage_${s.id}" class="compare-file" type="file" accept="image/*" onchange="Comparator.processSupplierImage('${s.id}',this)">
               <button id="supplierRecord_${s.id}" class="btn line" onclick="Comparator.toggleSupplierRecording('${s.id}')"><i class="fa-solid fa-microphone"></i> Gravar áudio</button>
               <label class="btn line" for="supplierAudio_${s.id}"><i class="fa-solid fa-file-audio"></i> Enviar áudio</label>
               <input id="supplierAudio_${s.id}" class="compare-file" type="file" accept="audio/*" onchange="Comparator.processSupplierAudio('${s.id}',this)">
