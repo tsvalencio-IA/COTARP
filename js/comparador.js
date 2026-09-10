@@ -1,5 +1,5 @@
 /*
-  Comparador de preços V12.1 — fluxo inteligente, painéis minimizáveis, separação automática de listas por linha, ponto e vírgula ou hífen, matriz visual com 3 fornecedores, PDF e reinício seguro.
+  Comparador de preços V12.2 — leitura fiel de fotos em alta resolução/recortes, áudio por fornecedor, fluxo inteligente, matriz visual com 3 fornecedores, PDF e reinício seguro.
   Regra central: nenhum dado lido por IA entra na comparação antes da confirmação humana.
 */
 (function(){
@@ -23,6 +23,7 @@
     },
     busySuppliers: new Set(),
     imagePreviews: {},
+    audioSessions: {},
     lastComparisonPdfBlob: null,
     startupNotice: '',
 
@@ -534,6 +535,7 @@
       this.clearPurchaseSelectionsForSupplier(id);
       this.state.suppliers.splice(index,1,replacement);
       delete this.imagePreviews[id];
+      const audio=this.audioSessions[id];if(audio){try{audio.media?.stop();}catch(e){}try{audio.stream?.getTracks()?.forEach(t=>t.stop());}catch(e){}delete this.audioSessions[id];}
       this.normalizeUI();
       delete this.state.ui.supplierOpen[id];
       delete this.state.ui.purchaseOpen[id];
@@ -556,7 +558,7 @@
       const t=this.$(`supplierBusyText_${id}`);if(t)t.textContent=text;
     },
 
-    knownBrands(){return ['LUK','VALEO','FANIA','MONROE','COFAP','AXIOS','NAKATA','SABO','SABÓ','SPICER','CORTECO','MOBENSANI','PERFECT','BROKITS','BROKIT','EFFARI','SKF','INA','TRW','VIEMAR','AUTHOMIX','AUTOMIX','AUTMIX'];},
+    knownBrands(){return ['LUK','VALEO','FANIA','MONROE','COFAP','AXIOS','NAKATA','SABO','SABÓ','SPICER','CORTECO','MOBENSANI','PERFECT','BROKITS','BROKIT','EFFARI','SKF','INA','TRW','VIEMAR','AUTHOMIX','AUTOMIX','AUTMIX','NGK','COBREQ','SCAPEX','HIPPER','HIPPER FREIOS','3-RHO','DS','ELRING','VOLDA','IRB','SNR','FLORIO','CLICK','SAMPEL','TECPADS','MDS','MOTORAÇO','MOTORACO','BOSCH','SYL'];},
     extractBrand(line){
       const p=this.plain(line);
       return this.knownBrands().find(b=>p.includes(this.plain(b)))||'';
@@ -631,11 +633,31 @@
     getTextModel(){return window.SOS_CONFIG?.GROQ_CHAT_MODEL||'openai/gpt-oss-20b';},
     getVisionModel(){return window.SOS_CONFIG?.GROQ_VISION_MODEL||'qwen/qwen3.6-27b';},
     extractionSchema(){
-      return {documentTotal:0,documentExtra:0,rows:[{description:'',brand:'',code:'',qty:0,qtyShown:false,priceType:'unit',value:0,extra:0,availability:'available',note:'',rawLine:''}]};
+      return {documentTotal:0,documentExtra:0,rows:[{supplierCode:'',description:'',unit:'',code:'',brand:'',qty:0,qtyShown:false,unitPrice:0,totalPrice:0,priceType:'unit',value:0,extra:0,availability:'available',note:'',rawLine:''}]};
     },
     extractionPrompt(kind,text=''){
-      return `Leia somente os dados visíveis desta cotação automotiva. Responda em JSON válido no formato ${JSON.stringify(this.extractionSchema())}.
-Regras: não invente; uma linha por produto; preserve marca/código; qty é somente a quantidade que estiver escrita e deve ser 0 quando não aparecer; a ausência de quantidade não significa falta de estoque; qtyShown informa se a quantidade estava visível; priceType é unit, total, unknown ou unavailable; value é o preço conforme priceType; extra é frete/ST da linha; documentTotal é o total final exibido; rawLine deve repetir literalmente a linha lida. Se não estiver legível, deixe zero/vazio e explique em note. Nunca marque unavailable quando houver preço positivo sem uma expressão explícita como 'não tem' ou 'sem estoque'.${kind==='TEXT'?`\nTEXTO:\n${text}`:''}`;
+      const imageRules=kind==='IMAGE'?`
+REGRAS ESPECÍFICAS PARA FOTO/TABELA:
+- Leia a cotação como documento, não como uma lista genérica de peças. Não simplifique, não traduza e não troque a denominação visível por sinônimo. Ex.: se estiver escrito "BUCHA QUADRO MOTOR (DIANT) (12MM)", description deve manter isso; não transformar em "bucha do agregado".
+- Quando a tabela tiver colunas semelhantes a "codigo | denominacao | un | cod.fabr | marca | qtde | pr.unit | vl total": supplierCode = codigo; description = denominacao; unit = un; code = cod.fabr; brand = marca; qty = qtde; unitPrice = pr.unit; totalPrice = vl total.
+- Copie códigos, marcas, quantidades e preços exatamente da linha visual correspondente. Não misture valores de linhas vizinhas.
+- unitPrice e totalPrice devem ser números separados. Se os dois estiverem visíveis, extraia os dois. value deve repetir unitPrice e priceType="unit"; somente quando não houver preço unitário e houver total, use value=totalPrice e priceType="total".
+- Se houver preço junto com indicação explícita de "indisponível", preserve o preço e marque availability="unavailable"; indisponibilidade não autoriza apagar o preço histórico.
+- As imagens podem incluir uma visão geral e recortes sobrepostos da MESMA foto. Una as informações e devolva cada linha física apenas uma vez.
+- Se uma célula não estiver legível, deixe o campo vazio/zero e diga exatamente o que não foi possível ler em note. Nunca complete pelo contexto.`:'';
+      return `Leia SOMENTE o que está efetivamente visível ou dito nesta cotação automotiva. Responda em JSON válido no formato ${JSON.stringify(this.extractionSchema())}.
+REGRAS ABSOLUTAS DE VERDADE:
+1) Não invente, não estime e não corrija silenciosamente.
+2) Uma linha por produto realmente presente na resposta do fornecedor.
+3) Preserve a descrição original, marca e códigos sem normalizar para outro nome.
+4) qty é somente a quantidade informada pelo fornecedor e deve ser 0 quando não aparecer; qtyShown indica se a quantidade estava visível/dita.
+5) availability é available, partial, unavailable ou unknown. Só use unavailable quando existir indicação explícita de indisponibilidade/falta.
+6) priceType é unit, total ou unknown quando existe preço; use unavailable apenas quando não existir preço e a linha disser que não tem.
+7) extra é somente frete/ST da própria linha. documentTotal é somente o total final realmente exibido/dito.
+8) rawLine deve reproduzir a linha ou frase fonte com máxima fidelidade.
+9) NÃO tente adaptar a descrição à lista de peças pedidas. A associação à lista é feita depois pelo sistema, localmente; nesta etapa sua única fonte é a cotação recebida.${imageRules}
+
+${kind==='TEXT'?`TEXTO REAL DO FORNECEDOR/ÁUDIO:\n${text}`:''}`;
     },
     async groqText(prompt,key){
       const payload={
@@ -648,11 +670,12 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
       if(!res.ok)throw new Error(data.error?.message||`Erro Groq ${res.status}`);
       return data.choices?.[0]?.message?.content||'';
     },
-    async groqVision(prompt,dataUrl,key,maxTokens=1800){
+    async groqVision(prompt,dataUrls,key,maxTokens=2600){
+      const images=(Array.isArray(dataUrls)?dataUrls:[dataUrls]).filter(Boolean);
       const payload={
         model:this.getVisionModel(),temperature:0,max_completion_tokens:maxTokens,
         response_format:{type:'json_object'},reasoning_effort:'none',
-        messages:[{role:'user',content:[{type:'text',text:prompt},{type:'image_url',image_url:{url:dataUrl}}]}]
+        messages:[{role:'user',content:[{type:'text',text:prompt},...images.map(url=>({type:'image_url',image_url:{url}}))]}]
       };
       const res=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify(payload)});
       const data=await res.json();
@@ -671,32 +694,58 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
         try{return JSON.parse(text);}catch(e2){throw new Error('A leitura não retornou dados válidos.');}
       }
     },
-    imageToDataURL(file,maxSide=1200,quality=.72){
+    readImageFile(file){
       return new Promise((resolve,reject)=>{
         const reader=new FileReader();
         reader.onerror=()=>reject(new Error('Falha ao abrir a imagem.'));
         reader.onload=()=>{
           const img=new Image();
           img.onerror=()=>reject(new Error('Imagem inválida.'));
-          img.onload=()=>{
-            const scale=Math.min(1,maxSide/Math.max(img.width,img.height));
-            const canvas=document.createElement('canvas');
-            canvas.width=Math.max(1,Math.round(img.width*scale));
-            canvas.height=Math.max(1,Math.round(img.height*scale));
-            const ctx=canvas.getContext('2d',{alpha:false});
-            ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);
-            ctx.drawImage(img,0,0,canvas.width,canvas.height);
-            resolve(canvas.toDataURL('image/jpeg',quality));
-          };
+          img.onload=()=>resolve(img);
           img.src=reader.result;
         };
         reader.readAsDataURL(file);
       });
     },
+    renderImageDataURL(img,{sx=0,sy=0,sw=img.width,sh=img.height,maxSide=2200,quality=.94}={}){
+      const scale=Math.min(1,maxSide/Math.max(sw,sh));
+      const canvas=document.createElement('canvas');
+      canvas.width=Math.max(1,Math.round(sw*scale));
+      canvas.height=Math.max(1,Math.round(sh*scale));
+      const ctx=canvas.getContext('2d',{alpha:false});
+      ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);
+      ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+      ctx.drawImage(img,sx,sy,sw,sh,0,0,canvas.width,canvas.height);
+      return canvas.toDataURL('image/jpeg',quality);
+    },
+    async imageToDataURL(file,maxSide=1800,quality=.90){
+      const img=await this.readImageFile(file);
+      return this.renderImageDataURL(img,{maxSide,quality});
+    },
+    async imageToVisionDataURLs(file){
+      const img=await this.readImageFile(file);
+      const images=[this.renderImageDataURL(img,{maxSide:1800,quality:.92})];
+      // Fotos de tabelas perdem dígitos quando toda a página é reduzida.
+      // Enviamos também faixas horizontais sobrepostas em resolução maior.
+      if(img.height>=520){
+        const slices=3,overlap=Math.round(img.height*.06);
+        const base=Math.ceil(img.height/slices);
+        for(let i=0;i<slices;i++){
+          const y0=Math.max(0,i*base-overlap);
+          const y1=Math.min(img.height,(i+1)*base+overlap);
+          images.push(this.renderImageDataURL(img,{sx:0,sy:y0,sw:img.width,sh:y1-y0,maxSide:2200,quality:.95}));
+        }
+      }
+      return images;
+    },
     normalizeDraft(raw){
       let priceType=['unit','total','unknown','unavailable'].includes(raw?.priceType)?raw.priceType:(raw?.availability==='unavailable'?'unavailable':'unknown');
       let availability=['available','partial','unavailable','unknown'].includes(raw?.availability)?raw.availability:(priceType==='unavailable'?'unavailable':'available');
+      const unitPrice=this.num(raw?.unitPrice);
+      const totalPrice=this.num(raw?.totalPrice);
       let value=this.num(raw?.value);
+      if(unitPrice>0){value=unitPrice;priceType='unit';}
+      else if(totalPrice>0&&!value){value=totalPrice;priceType='total';}
       const rawLine=String(raw?.rawLine||'').trim();
       let note=String(raw?.note||'').trim();
       const explicitUnavailable=this.parseAvailability(`${rawLine} ${note}`)==='unavailable';
@@ -712,21 +761,26 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
       // Só mantemos indisponível quando a própria resposta contém expressão explícita de falta.
       if(explicitUnavailable){
         availability='unavailable';
-        priceType='unavailable';
-        value=0;
-      }else if(value>0 && (availability==='unavailable'||priceType==='unavailable')){
-        availability='available';
-        priceType=this.num(raw?.qty)>1?'unknown':'unit';
+        // Um fornecedor pode mostrar preço histórico e, ao mesmo tempo, informar indisponibilidade.
+        // Preservamos o preço; ele apenas não participa da escolha de compra.
+        if(value<=0)priceType='unavailable';
+        else if(priceType==='unavailable')priceType=unitPrice>0?'unit':totalPrice>0?'total':(this.num(raw?.qty)>1?'unknown':'unit');
+      }else if(value>0 && priceType==='unavailable'){
+        priceType=unitPrice>0?'unit':totalPrice>0?'total':(this.num(raw?.qty)>1?'unknown':'unit');
       }
 
       return {
         id:raw?.id||this.id('off'),order:this.num(raw?.order),description:String(raw?.description||'').trim(),brand:String(raw?.brand||'').trim(),code:String(raw?.code||'').trim(),
+        supplierCode:String(raw?.supplierCode||'').trim(),unitLabel:String(raw?.unit||raw?.unitLabel||'').trim(),quotedTotal:totalPrice||this.num(raw?.quotedTotal),
         qty:this.num(raw?.qty),qtyShown:!!raw?.qtyShown,priceType,value,extra:this.num(raw?.extra),availability,
         note,rawLine,requestedId:String(raw?.requestedId||''),ignored:!!raw?.ignored,source:raw?.source||''
       };
     },
     normalizeParsed(parsed,source){
-      const rows=this.contextualizeKits(Array.isArray(parsed?.rows)?parsed.rows:[]);
+      const rawRows=Array.isArray(parsed?.rows)?parsed.rows:[];
+      // Foto e áudio são fontes documentais: nunca reescreva a descrição com contexto de outra linha.
+      // A contextualização de kits permanece apenas no parser textual legado, onde não existe uma tabela visual a preservar.
+      const rows=(source==='image'||source==='audio')?rawRows:this.contextualizeKits(rawRows);
       return {
         rows:rows.map((r,i)=>this.normalizeDraft({...r,order:i,source})).filter(r=>r.description||r.value||r.availability==='unavailable'),
         documentTotal:this.num(parsed?.documentTotal),documentExtra:this.num(parsed?.documentExtra)
@@ -749,40 +803,133 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
         this.toast('Não foi possível interpretar a mensagem. Nenhum preço foi salvo.');
       }finally{this.setSupplierBusy(id,false);}
     },
+    imageRowKey(row){
+      const unit=this.num(row?.unitPrice||((row?.priceType==='unit')?row?.value:0));
+      const total=this.num(row?.totalPrice||row?.quotedTotal||((row?.priceType==='total')?row?.value:0));
+      const strong=String(row?.supplierCode||'').trim()||String(row?.code||'').trim();
+      return [this.plain(strong),this.plain(row?.description||''),this.plain(row?.brand||''),this.num(row?.qty),unit,total].join('|');
+    },
+    mergeImageRows(rows){
+      const out=[],seen=new Map();
+      (rows||[]).forEach(row=>{
+        const key=this.imageRowKey(row);
+        if(!key.replace(/\|/g,''))return;
+        if(!seen.has(key)){seen.set(key,out.length);out.push(row);return;}
+        const i=seen.get(key),prev=out[i];
+        // Em duplicata de recorte, mantemos a versão que trouxe mais campos visíveis.
+        const score=x=>['supplierCode','description','unit','code','brand','rawLine'].reduce((n,k)=>n+(String(x?.[k]||'').trim()?1:0),0)+(this.num(x?.qty)>0?1:0)+(this.num(x?.unitPrice)>0?1:0)+(this.num(x?.totalPrice)>0?1:0);
+        if(score(row)>score(prev))out[i]=row;
+      });
+      return out;
+    },
+    async readSupplierImageFile(file,key,id,index,total){
+      this.setSupplierBusy(id,true,total>1?`Lendo foto ${index+1} de ${total} em alta resolução...`:'Lendo a foto em alta resolução...');
+      let dataUrls=await this.imageToVisionDataURLs(file);
+      try{
+        const content=await this.groqVision(this.extractionPrompt('IMAGE'),dataUrls,key,3000);
+        return this.normalizeParsed(this.extractJSON(content),'image');
+      }catch(firstError){
+        const msg=String(firstError.message||'');
+        if([400,413,429].includes(firstError.status) || /too large|token limit|tokens per minute|requested|context|image count|too many images/i.test(msg)){
+          this.setSupplierBusy(id,true,'A foto excedeu o limite. Tentando leitura compacta sem perder a linha inteira...');
+          const compact=await this.imageToDataURL(file,1400,.86);
+          const content=await this.groqVision(this.extractionPrompt('IMAGE'),[compact],key,1800);
+          return this.normalizeParsed(this.extractJSON(content),'image');
+        }
+        throw firstError;
+      }
+    },
     async processSupplierImage(id,input){
-      const s=this.supplier(id),file=input?.files?.[0];if(!s||!file)return;
+      const s=this.supplier(id),files=Array.from(input?.files||[]);if(!s||!files.length)return;
       if(!this.state.requested.length){this.toast('Primeiro carregue a lista solicitada.');input.value='';return;}
       const key=this.getGroqKey();
       if(!key){this.toast('A chave Groq não está configurada. Nenhum dado foi incluído.');input.value='';return;}
-      s.imageName=file.name;s.confirmed=false;s.offers=[];
+      s.imageName=files.map(f=>f.name).join(' | ');s.confirmed=false;s.offers=[];
       if(this.imagePreviews[id]){try{URL.revokeObjectURL(this.imagePreviews[id]);}catch(e){}}
-      this.imagePreviews[id]=URL.createObjectURL(file);
+      this.imagePreviews[id]=URL.createObjectURL(files[0]);
       const preview=this.$(`supplierPreview_${id}`);
       if(preview){preview.src=this.imagePreviews[id];preview.classList.add('show');}
-      this.setSupplierBusy(id,true,'Lendo a foto...');
       try{
-        let dataUrl=await this.imageToDataURL(file,1200,.72);
-        let content;
-        try{
-          content=await this.groqVision(this.extractionPrompt('IMAGE'),dataUrl,key,1800);
-        }catch(firstError){
-          const msg=String(firstError.message||'');
-          if(firstError.status===429 || /too large|token limit|tokens per minute|requested/i.test(msg)){
-            this.setSupplierBusy(id,true,'Reduzindo a foto e tentando novamente...');
-            dataUrl=await this.imageToDataURL(file,900,.62);
-            content=await this.groqVision(this.extractionPrompt('IMAGE'),dataUrl,key,1000);
-          }else throw firstError;
+        const combined={rows:[],documentTotal:0,documentExtra:0};
+        for(let i=0;i<files.length;i++){
+          const parsed=await this.readSupplierImageFile(files[i],key,id,i,files.length);
+          combined.rows.push(...(parsed.rows||[]));
+          if(this.num(parsed.documentTotal)>0)combined.documentTotal=this.num(parsed.documentTotal);
+          if(this.num(parsed.documentExtra)>0)combined.documentExtra=this.num(parsed.documentExtra);
         }
-        const parsed=this.normalizeParsed(this.extractJSON(content),'image');
-        this.applyDraft(s,parsed,'image');
+        combined.rows=this.mergeImageRows(combined.rows);
+        this.applyDraft(s,combined,'image');
+        this.toast(`${combined.rows.length} linha(s) lida(s) da(s) foto(s). Confira descrição, código, marca, quantidade e preços antes de salvar.`);
       }catch(e){
         console.error(e);
         s.draftOffers=[];s.confirmed=false;s.offers=[];
         this.renderAll();
-        this.toast('A foto não foi lida. Nenhum preço foi salvo. Use outra foto ou cole o texto.');
+        this.toast('A foto não foi lida com segurança. Nenhum preço foi salvo. Use outra foto, áudio ou cole o texto.');
       }finally{
         this.setSupplierBusy(id,false);input.value='';
       }
+    },
+    async processSupplierAudio(id,input){
+      const s=this.supplier(id),file=input?.files?.[0];if(!s||!file)return;
+      try{await this.transcribeSupplierAudio(id,file,file.name);}finally{input.value='';}
+    },
+    async transcribeSupplierAudio(id,blob,name='cotacao.webm'){
+      const s=this.supplier(id);if(!s)return;
+      if(!this.state.requested.length){this.toast('Primeiro carregue a lista solicitada.');return;}
+      const key=this.getGroqKey();
+      if(!key){this.toast('A chave Groq não está configurada.');return;}
+      this.setSupplierBusy(id,true,'Transcrevendo áudio com a mesma chave Groq...');
+      const fd=new FormData();
+      fd.append('file',blob,name);
+      fd.append('model',window.SOS_CONFIG?.GROQ_TRANSCRIPTION_MODEL||'whisper-large-v3-turbo');
+      fd.append('language','pt');
+      fd.append('response_format','json');
+      try{
+        const res=await fetch('https://api.groq.com/openai/v1/audio/transcriptions',{method:'POST',headers:{Authorization:`Bearer ${key}`},body:fd});
+        const data=await res.json();
+        if(!res.ok)throw new Error(data.error?.message||`Erro Groq ${res.status}`);
+        const transcript=String(data.text||'').trim();
+        if(!transcript)throw new Error('A transcrição veio vazia.');
+        s.responseText=[String(s.responseText||'').trim(),transcript].filter(Boolean).join('\n');
+        s.confirmed=false;s.offers=[];
+        const textEl=this.$(`supplierText_${id}`);if(textEl)textEl.value=s.responseText;
+        this.setSupplierBusy(id,true,'Interpretando somente o que foi dito no áudio...');
+        let parsed;
+        try{
+          const content=await this.groqText(this.extractionPrompt('TEXT',transcript),key);
+          parsed=this.normalizeParsed(this.extractJSON(content),'audio');
+        }catch(aiError){
+          console.warn('Falha na extração do áudio por IA; usando parser local.',aiError);
+          parsed=this.parseOffersLocal(transcript);
+        }
+        this.applyDraft(s,parsed,'audio');
+        this.toast('Áudio transcrito e transformado em rascunho. Confira tudo antes de salvar.');
+      }catch(e){
+        console.error(e);this.toast(`Não foi possível ler o áudio: ${e.message||'erro desconhecido'}`);
+      }finally{this.setSupplierBusy(id,false);}
+    },
+    supplierRecordButton(id,recording){
+      const btn=this.$(`supplierRecord_${id}`);if(!btn)return;
+      btn.classList.toggle('recording',!!recording);
+      btn.innerHTML=recording?'<i class="fa-solid fa-stop"></i> Parar gravação':'<i class="fa-solid fa-microphone"></i> Gravar áudio';
+    },
+    async toggleSupplierRecording(id){
+      const s=this.supplier(id);if(!s)return;
+      const current=this.audioSessions[id];
+      if(current?.recording){current.media.stop();return;}
+      try{
+        const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+        const session={stream,chunks:[],recording:true,media:new MediaRecorder(stream)};
+        this.audioSessions[id]=session;
+        session.media.ondataavailable=e=>{if(e.data.size)session.chunks.push(e.data);};
+        session.media.onstop=async()=>{
+          session.recording=false;stream.getTracks().forEach(t=>t.stop());this.supplierRecordButton(id,false);
+          const blob=new Blob(session.chunks,{type:session.media.mimeType||'audio/webm'});
+          delete this.audioSessions[id];
+          if(blob.size)await this.transcribeSupplierAudio(id,blob,'cotacao-fornecedor.webm');
+        };
+        session.media.start();this.supplierRecordButton(id,true);this.toast('Gravando a resposta do fornecedor...');
+      }catch(e){this.toast('Microfone negado ou indisponível.');}
     },
     applyDraft(s,parsed,source){
       s.documentTotal=this.num(parsed?.documentTotal);
@@ -797,6 +944,14 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
     normalizeMatch(value){
       let p=this.plain(value);
       const rep=[
+        [/\bLD\b/g,' DIREITO '],
+        [/\bLE\b/g,' ESQUERDO '],
+        [/\bQUADRO MOTOR\b/g,' AGREGADO '],
+        [/\bCEBOLINHA(?: DO)? OLEO(?: MOTOR)?\b/g,' SENSOR PRESSAO OLEO '],
+        [/\bCEBOLINHA\b/g,' SENSOR PRESSAO OLEO '],
+        [/\bBOIA TANQUE\b/g,' SENSOR NIVEL COMBUSTIVEL '],
+        [/\bSENS NIVEL\b/g,' SENSOR NIVEL '],
+        [/\bSILENCIOSO\b/g,' ESCAPAMENTO '],
         [/\bPNEUZINHOS?\b/g,' BUCHA BARRA ESTABILIZADORA '],
         [/\bCOIFA RODA\b/g,' COIFA HOMOCINETICA EXTERNA '],
         [/\bCOIFA CAMBIO\b/g,' COIFA HOMOCINETICA INTERNA '],
@@ -818,12 +973,15 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
         const token=this.plain(brand).replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
         if(token)p=p.replace(new RegExp(`\\b${token}\\b`,'g'),' ');
       });
+      p=p.replace(/\b(DE|DO|DA|DOS|DAS|PARA|COM|SEM)\b/g,' ');
       return p.replace(/\s+/g,' ').trim();
     },
     concept(value){
       const p=this.normalizeMatch(value);
       if(/CABO.*EMBREAGEM|EMBREAGEM.*CABO/.test(p))return 'CABO_EMBREAGEM';
       if(/EMBREAGEM/.test(p))return 'EMBREAGEM';
+      if(/SENSOR.*PRESSAO.*OLEO|PRESSAO.*OLEO.*SENSOR/.test(p))return 'SENSOR_PRESSAO_OLEO';
+      if(/BUCHA.*AGREGADO|AGREGADO.*BUCHA/.test(p))return 'BUCHA_AGREGADO';
       if(/RETENTOR/.test(p)&&/(MANCAL|VIRABREQUIM|FLANGE)/.test(p))return 'RETENTOR';
       if(/COIFA/.test(p)&&/(EXTERNA|RODA)/.test(p))return 'COIFA_EXTERNA';
       if(/COIFA/.test(p)&&/(INTERNA|CAMBIO)/.test(p))return 'COIFA_INTERNA';
@@ -845,7 +1003,8 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
       const frontA=/DIANTEIRO/.test(a),rearA=/TRASEIRO/.test(a),frontB=/DIANTEIRO/.test(b),rearB=/TRASEIRO/.test(b);
       const inA=/INTERNA/.test(a),outA=/EXTERNA/.test(a),inB=/INTERNA/.test(b),outB=/EXTERNA/.test(b);
       const lowerA=/INFERIOR/.test(a),upperA=/SUPERIOR/.test(a),lowerB=/INFERIOR/.test(b),upperB=/SUPERIOR/.test(b);
-      if((frontA&&rearB)||(rearA&&frontB)||(inA&&outB)||(outA&&inB)||(lowerA&&upperB)||(upperA&&lowerB))return 0;
+      const rightA=/DIREITO/.test(a),leftA=/ESQUERDO/.test(a),rightB=/DIREITO/.test(b),leftB=/ESQUERDO/.test(b);
+      if((frontA&&rearB)||(rearA&&frontB)||(inA&&outB)||(outA&&inB)||(lowerA&&upperB)||(upperA&&lowerB)||(rightA&&leftB)||(leftA&&rightB))return 0;
       const ca=this.concept(a),cb=this.concept(b);
       const A=new Set(a.split(' ').filter(w=>w.length>2)),B=new Set(b.split(' ').filter(w=>w.length>2));
       const inter=[...A].filter(x=>B.has(x)).length,union=new Set([...A,...B]).size||1;
@@ -856,6 +1015,10 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
       if(ca==='COXIM_CAMBIO'&&cb==='COXIM_CAMBIO'&&((lowerA&&lowerB)||(upperA&&upperB)))score+=.75;
       if(ca==='KIT'&&cb==='KIT_AMORTECEDOR')score+=.35;
       if((ca==='LIGACAO_BARRA'&&cb==='PIVO')||(ca==='PIVO'&&cb==='LIGACAO_BARRA'))score+=.72;
+      // Código de fabricante visível é a evidência mais forte para associar a linha sem alterar a descrição original.
+      const requestRaw=this.plain(request.description);
+      const codes=[offer.code,offer.supplierCode].map(x=>this.plain(x)).filter(x=>x.length>=3);
+      if(codes.some(code=>requestRaw.includes(code)))score+=3;
       return score;
     },
     suggestRequestedId(offer,offerIndex,totalOffers){
@@ -880,21 +1043,17 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
 
     updateDraft(id,offerId,field,value){
       const s=this.supplier(id),o=s?.draftOffers?.find(x=>x.id===offerId);if(!o)return;
-      if(['qty','value','extra'].includes(field)){o[field]=this.num(value);if(field==='qty')o.qtyShown=true;}
+      if(['qty','value','extra','quotedTotal'].includes(field)){o[field]=this.num(value);if(field==='qty')o.qtyShown=true;}
       else if(field==='ignored')o[field]=!!value;
       else o[field]=value;
 
-      // Evita o erro grave de manter “NÃO TEM” escondido quando existe preço informado.
-      if(field==='value'&&this.num(o.value)>0){
-        if(o.availability==='unavailable')o.availability='available';
-        if(o.priceType==='unavailable')o.priceType=this.num(o.qty)>1?'unknown':'unit';
-      }
+      // Preço e disponibilidade são fatos independentes: "indisponível" não apaga preço histórico.
+      if(field==='value'&&this.num(o.value)>0&&o.priceType==='unavailable')o.priceType=this.num(o.qty)>1?'unknown':'unit';
       if(field==='priceType'){
-        if(value==='unavailable'){o.availability='unavailable';o.value=0;}
-        else if(o.availability==='unavailable')o.availability='available';
+        if(value==='unavailable'){o.availability='unavailable';if(this.num(o.value)>0)o.priceType=this.num(o.qty)>1?'unknown':'unit';}
       }
       if(field==='availability'){
-        if(value==='unavailable'){o.priceType='unavailable';o.value=0;}
+        if(value==='unavailable'){if(this.num(o.value)<=0)o.priceType='unavailable';else if(o.priceType==='unavailable')o.priceType=this.num(o.qty)>1?'unknown':'unit';}
         else if(o.priceType==='unavailable')o.priceType=this.num(o.value)>0?'unit':'unknown';
       }
 
@@ -949,12 +1108,13 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
       const request=this.state.requested.find(r=>r.id===o.requestedId)||null;
       if(o.ignored) return {usable:false,issues:['Linha ignorada.'],request};
       if(!request) issues.push('Escolha qual peça da sua lista corresponde a este preço.');
+      if(o.qtyShown&&this.num(o.qty)>0&&this.num(o.value)>0&&this.num(o.quotedTotal)>0&&o.priceType==='unit'){
+        const expected=this.num(o.qty)*this.num(o.value),shown=this.num(o.quotedTotal),tolerance=Math.max(.05,shown*.002);
+        if(Math.abs(expected-shown)>tolerance)issues.push(`Conferência da foto: QTD ${o.qty} × ${this.money(o.value)} = ${this.money(expected)}, mas o total lido foi ${this.money(shown)}. Revise esta linha.`);
+      }
       if(o.availability==='unavailable'||o.priceType==='unavailable'){
-        if(this.num(o.value)>0){
-          issues.push('Existe preço informado; esta linha não pode ser salva como “NÃO TEM”.');
-          return {usable:false,issues,request,unavailable:false};
-        }
-        return {usable:!!request,issues,request,unavailable:true};
+        if(this.num(o.value)>0&&o.priceType==='unknown')issues.push('Há preço histórico: escolha se ele é unitário ou total.');
+        return {usable:issues.length===0,issues,request,unavailable:true};
       }
       if(this.num(o.value)<=0) issues.push('Informe um preço válido.');
       if(o.priceType==='unknown') issues.push('Escolha se o preço é unitário ou total.');
@@ -1059,13 +1219,16 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
               <option value="unavailable" ${o.priceType==='unavailable'?'selected':''}>NÃO TEM</option>
             </select></div>
           </div>
-          <div class="compare-calc-note">${request?`Será comparado para <b>${this.esc(request.qty)} unidade(s)</b> pedida(s).`: 'Escolha a peça correspondente para liberar este preço.'} ${o.availability==='partial'?`Fornecedor informou disponibilidade parcial de <b>${this.esc(o.qty)}</b>.`:''}</div>
+          <div class="compare-calc-note">${request?`Será comparado para <b>${this.esc(request.qty)} unidade(s)</b> pedida(s).`: 'Escolha a peça correspondente para liberar este preço.'} ${o.qtyShown?`Na resposta do fornecedor aparece <b>QTD ${this.esc(o.qty)}</b>.`:''} ${o.availability==='partial'?`Disponibilidade parcial: <b>${this.esc(o.qty)}</b>.`:''}${o.availability==='unavailable'?` <b>Indisponível</b>${this.num(o.value)>0?' com preço histórico preservado.':'.'}`:''}</div>
           <details class="compare-row-more"><summary>Mais detalhes</summary><div class="compare-advanced-grid">
             <div><label>Descrição original</label><input value="${this.attr(o.description)}" oninput="Comparator.updateDraft('${s.id}','${o.id}','description',this.value)"></div>
             <div><label>Disponibilidade</label><select id="availability_${s.id}_${o.id}" onchange="Comparator.updateDraft('${s.id}','${o.id}','availability',this.value)"><option value="available" ${o.availability==='available'?'selected':''}>TEM / COTOU</option><option value="partial" ${o.availability==='partial'?'selected':''}>SÓ TEM PARTE</option><option value="unavailable" ${o.availability==='unavailable'?'selected':''}>NÃO TEM</option></select></div>
             <div><label>Qtd. informada</label><input inputmode="decimal" value="${this.attr(o.qty||'')}" placeholder="Opcional" oninput="Comparator.updateDraft('${s.id}','${o.id}','qty',this.value)"></div>
             <div><label>Frete/ST desta linha</label><input inputmode="decimal" value="${this.attr(o.extra||'')}" placeholder="0,00" oninput="Comparator.updateDraft('${s.id}','${o.id}','extra',this.value)"></div>
-            <div><label>Código</label><input value="${this.attr(o.code)}" placeholder="Opcional" oninput="Comparator.updateDraft('${s.id}','${o.id}','code',this.value)"></div>
+            <div><label>Cód. fabricante</label><input value="${this.attr(o.code)}" placeholder="Opcional" oninput="Comparator.updateDraft('${s.id}','${o.id}','code',this.value)"></div>
+            <div><label>Cód. fornecedor</label><input value="${this.attr(o.supplierCode)}" placeholder="Opcional" oninput="Comparator.updateDraft('${s.id}','${o.id}','supplierCode',this.value)"></div>
+            <div><label>Unidade da cotação</label><input value="${this.attr(o.unitLabel)}" placeholder="Ex.: PC / JG / KT" oninput="Comparator.updateDraft('${s.id}','${o.id}','unitLabel',this.value)"></div>
+            <div><label>Total lido na linha</label><input inputmode="decimal" value="${this.attr(o.quotedTotal||'')}" placeholder="Opcional" oninput="Comparator.updateDraft('${s.id}','${o.id}','quotedTotal',this.value)"></div>
             <div><label>Observação</label><input value="${this.attr(o.note)}" placeholder="Opcional" oninput="Comparator.updateDraft('${s.id}','${o.id}','note',this.value)"></div>
           </div>${o.rawLine?`<div class="compare-source-line"><b>Resposta original:</b> ${this.esc(o.rawLine)}</div>`:''}</details>
         </div>`;
@@ -1105,7 +1268,12 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
         const confirmed=s.confirmed,open=this.supplierOpen(s.id);
         const confirmedRows=(s.offers||[]).map(o=>{
           const req=this.state.requested.find(r=>r.id===o.requestedId);
-          const label=o.priceType==='unit'?`${this.money(o.value)} cada`:o.priceType==='total'?`${this.money(o.value)} total`:'NÃO TEM';
+          const unavailable=o.availability==='unavailable'||o.priceType==='unavailable';
+          let label='NÃO TEM';
+          if(unavailable){
+            label=o.value>0?`INDISPONÍVEL · ${o.priceType==='total'?`${this.money(o.value)} total`:`${this.money(o.value)} cada`}`:'INDISPONÍVEL';
+          }else if(o.priceType==='unit')label=`${this.money(o.value)} cada`;
+          else if(o.priceType==='total')label=`${this.money(o.value)} total`;
           return `<div class="compare-confirmed-line"><div><b>${this.esc(req?.description||o.description)}</b><span>${this.esc(o.brand||'SEM MARCA INFORMADA')}</span></div><strong>${label}</strong></div>`;
         }).join('');
         const body=confirmed?`<div class="compare-success"><b>Preços conferidos.</b> As peças que este fornecedor não respondeu aparecem como “não respondeu” na tabela.</div><div class="compare-confirmed-list">${confirmedRows||'<div class="compare-empty">Nenhum preço salvo.</div>'}</div>
@@ -1115,8 +1283,11 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
             <textarea id="supplierText_${s.id}" class="compare-source" placeholder="Cole somente o que este fornecedor respondeu. Pode ser apenas uma peça." oninput="Comparator.updateSupplier('${s.id}','responseText',this.value)">${this.esc(s.responseText||'')}</textarea>
             <div class="compare-simple-actions compare-read-actions">
               <button class="btn main" onclick="Comparator.processSupplierText('${s.id}')"><i class="fa-solid fa-wand-magic-sparkles"></i> Interpretar mensagem</button>
-              <label class="btn line" for="supplierImage_${s.id}"><i class="fa-solid fa-camera"></i> Ler foto</label>
-              <input id="supplierImage_${s.id}" class="compare-file" type="file" accept="image/*" onchange="Comparator.processSupplierImage('${s.id}',this)">
+              <label class="btn line" for="supplierImage_${s.id}"><i class="fa-solid fa-camera"></i> Ler foto(s)</label>
+              <input id="supplierImage_${s.id}" class="compare-file" type="file" accept="image/*" multiple onchange="Comparator.processSupplierImage('${s.id}',this)">
+              <button id="supplierRecord_${s.id}" class="btn line" onclick="Comparator.toggleSupplierRecording('${s.id}')"><i class="fa-solid fa-microphone"></i> Gravar áudio</button>
+              <label class="btn line" for="supplierAudio_${s.id}"><i class="fa-solid fa-file-audio"></i> Enviar áudio</label>
+              <input id="supplierAudio_${s.id}" class="compare-file" type="file" accept="audio/*" onchange="Comparator.processSupplierAudio('${s.id}',this)">
               <button class="btn line" onclick="Comparator.removeSupplier('${s.id}')"><i class="fa-solid fa-broom"></i> Limpar</button>
             </div>
             <img id="supplierPreview_${s.id}" src="${this.attr(this.imagePreviews[s.id]||'')}" class="compare-image-preview ${this.imagePreviews[s.id]?'show':''}" alt="Prévia da cotação">
@@ -1328,7 +1499,8 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
       if(offer.partial) classes.push('partial');
       if(offer.unavailable) classes.push('unavailable');
       if(offer.unavailable){
-        return `<div class="${classes.join(' ')}"><div class="compare-option-top"><b>${this.esc(offer.brand||'SEM MARCA')}</b><span>NÃO TEM</span></div>${offer.note?`<small>${this.esc(offer.note)}</small>`:''}</div>`;
+        const historical=this.num(offer.quotedUnit)>0;
+        return `<div class="${classes.join(' ')}"><div class="compare-option-top"><b>${this.esc(offer.brand||'SEM MARCA')}</b><span>INDISPONÍVEL</span></div>${offer.code?`<small>Cód. ${this.esc(offer.code)}</small>`:''}${historical?`<div class="compare-option-prices"><span>${this.money(offer.quotedUnit)} <small>cada</small></span><strong>FORA DA ESCOLHA</strong></div><small>Preço informado preservado somente como referência histórica.</small>`:''}${offer.note?`<small>${this.esc(offer.note)}</small>`:''}</div>`;
       }
       const stock=offer.partial?`SÓ TEM ${this.esc(offer.offeredQty)} DE ${this.esc(offer.requiredQty)}`:'';
       const selected=this.isPurchaseOfferSelected(offer);
@@ -1524,7 +1696,12 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
           const hasPartial=offers.some(o=>o.partial);
           const onlyUnavailable=offers.every(o=>o.unavailable);
           const text=offers.map(o=>{
-            if(o.unavailable) return `${o.brand||'SEM MARCA'} — NÃO TEM`;
+            if(o.unavailable){
+              const parts=[o.brand||'SEM MARCA','INDISPONÍVEL'];
+              if(o.code)parts.push(`Cód. ${o.code}`);
+              if(this.num(o.quotedUnit)>0)parts.push(`${this.money(o.quotedUnit)} cada (referência; fora da escolha)`);
+              return parts.join(' | ');
+            }
             const parts=[o.brand||'SEM MARCA',`${this.money(o.quotedUnit)} cada`,`${this.money(o.total)} total final`];
             if(o.extraTotal>0)parts.push(`Frete/ST da linha: ${this.money(o.extraTotal)}`);
             if(o.code)parts.push(`Cód. ${o.code}`);
@@ -1662,6 +1839,8 @@ Regras: não invente; uma linha por produto; preserve marca/código; qty é some
       if(!this.confirm('ZERAR ESTA COTAÇÃO? A lista, os 3 fornecedores, os preços conferidos e a comparação serão apagados. O orçamento principal continuará intacto.'))return;
       Object.values(this.imagePreviews||{}).forEach(url=>{try{URL.revokeObjectURL(url);}catch(e){}});
       this.imagePreviews={};
+      Object.values(this.audioSessions||{}).forEach(a=>{try{a.media?.stop();}catch(e){}try{a.stream?.getTracks()?.forEach(t=>t.stop());}catch(e){}});
+      this.audioSessions={};
       this.lastComparisonPdfBlob=null;
       this.state=this.defaultState();
       try{
