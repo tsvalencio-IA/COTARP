@@ -94,7 +94,6 @@
     } else if (isIOS()) {
       showInstallButton();
     } else {
-      // Exibe uma alternativa de instrução caso o navegador não dispare o evento.
       window.setTimeout(() => {
         if (!isStandalone() && !deferredPrompt && /android|mobile/i.test(navigator.userAgent)) showInstallButton();
       }, 1800);
@@ -108,13 +107,33 @@
     }
   });
 
+  function loadSupplierTextFix() {
+    if (document.querySelector('script[data-cotarp-supplier-text-fix]')) return;
+    const script = document.createElement('script');
+    script.src = 'js/comparador-v12.1.5-text-fix.js?v=12.1.5';
+    script.dataset.cotarpSupplierTextFix = '12.1.5';
+    script.onload = () => console.info('[COTARP] Correção da importação de texto V12.1.5 carregada.');
+    script.onerror = () => console.error('[COTARP] Falha ao carregar correção V12.1.5 da importação de texto.');
+    document.head.appendChild(script);
+  }
+
   function loadVisionModelFix() {
-    if (document.querySelector('script[data-cotarp-vision-model-fix]')) return;
+    const existing = document.querySelector('script[data-cotarp-vision-model-fix]');
+    if (existing) {
+      loadSupplierTextFix();
+      return;
+    }
     const script = document.createElement('script');
     script.src = 'js/comparador-v12.1.4-model-fix.js?v=12.1.4';
     script.dataset.cotarpVisionModelFix = '12.1.4';
-    script.onload = () => console.info('[COTARP] Correção de acesso à visão V12.1.4 carregada.');
-    script.onerror = () => console.error('[COTARP] Falha ao carregar correção V12.1.4 de visão.');
+    script.onload = () => {
+      console.info('[COTARP] Correção de acesso à visão V12.1.4 carregada.');
+      loadSupplierTextFix();
+    };
+    script.onerror = () => {
+      console.error('[COTARP] Falha ao carregar correção V12.1.4 de visão.');
+      loadSupplierTextFix();
+    };
     document.head.appendChild(script);
   }
 
