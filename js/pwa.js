@@ -108,12 +108,29 @@
     }
   });
 
+  function loadVisionModelFix() {
+    if (document.querySelector('script[data-cotarp-vision-model-fix]')) return;
+    const script = document.createElement('script');
+    script.src = 'js/comparador-v12.1.4-model-fix.js?v=12.1.4';
+    script.dataset.cotarpVisionModelFix = '12.1.4';
+    script.onload = () => console.info('[COTARP] Correção de acesso à visão V12.1.4 carregada.');
+    script.onerror = () => console.error('[COTARP] Falha ao carregar correção V12.1.4 de visão.');
+    document.head.appendChild(script);
+  }
+
   function loadComparatorFix() {
-    if (document.querySelector('script[data-cotarp-comparator-fix]')) return;
+    const existing = document.querySelector('script[data-cotarp-comparator-fix]');
+    if (existing) {
+      loadVisionModelFix();
+      return;
+    }
     const script = document.createElement('script');
     script.src = 'js/comparador-v12.1.3-fix.js?v=12.1.3';
     script.dataset.cotarpComparatorFix = '12.1.3';
-    script.onload = () => console.info('[COTARP] Correção do comparador V12.1.3 carregada.');
+    script.onload = () => {
+      console.info('[COTARP] Correção do comparador V12.1.3 carregada.');
+      loadVisionModelFix();
+    };
     script.onerror = () => console.error('[COTARP] Falha ao carregar correção V12.1.3 do comparador.');
     document.head.appendChild(script);
   }
