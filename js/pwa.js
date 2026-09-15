@@ -108,5 +108,17 @@
     }
   });
 
+  function loadComparatorFix() {
+    if (document.querySelector('script[data-cotarp-comparator-fix]')) return;
+    const script = document.createElement('script');
+    script.src = 'js/comparador-v12.1.3-fix.js?v=12.1.3';
+    script.dataset.cotarpComparatorFix = '12.1.3';
+    script.onload = () => console.info('[COTARP] Correção do comparador V12.1.3 carregada.');
+    script.onerror = () => console.error('[COTARP] Falha ao carregar correção V12.1.3 do comparador.');
+    document.head.appendChild(script);
+  }
+
+  window.addEventListener('load', loadComparatorFix);
+
   window.PWAInstall = { install, closeHelp };
 })();
