@@ -65,7 +65,7 @@
   async function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
     try {
-      const registration = await navigator.serviceWorker.register('/COTARP/sw.js?v=12.1.7', { scope: '/COTARP/' });
+      const registration = await navigator.serviceWorker.register('/COTARP/sw.js?v=12.1.8', { scope: '/COTARP/' });
       if (registration.waiting) registration.waiting.postMessage('SKIP_WAITING');
     } catch (error) {
       console.error('[SOS Orçamentos IA] Falha ao registrar Service Worker:', error);
@@ -107,12 +107,28 @@
     }
   });
 
+  function loadFidelityFix() {
+    if (document.querySelector('script[data-cotarp-fidelity-fix]')) return;
+    const script = document.createElement('script');
+    script.src = 'js/comparador-v12.1.8-fidelity-fix.js?v=12.1.8';
+    script.dataset.cotarpFidelityFix = '12.1.8';
+    script.onload = () => console.info('[COTARP] Correção de fidelidade V12.1.8 carregada.');
+    script.onerror = () => console.error('[COTARP] Falha ao carregar correção de fidelidade V12.1.8.');
+    document.head.appendChild(script);
+  }
+
   function loadSupplierTextFix() {
-    if (document.querySelector('script[data-cotarp-supplier-text-fix]')) return;
+    if (document.querySelector('script[data-cotarp-supplier-text-fix]')) {
+      loadFidelityFix();
+      return;
+    }
     const script = document.createElement('script');
     script.src = 'js/comparador-v12.1.5-text-fix.js?v=12.1.5';
     script.dataset.cotarpSupplierTextFix = '12.1.5';
-    script.onload = () => console.info('[COTARP] Correção da importação de texto V12.1.5 carregada.');
+    script.onload = () => {
+      console.info('[COTARP] Correção da importação de texto V12.1.5 carregada.');
+      loadFidelityFix();
+    };
     script.onerror = () => console.error('[COTARP] Falha ao carregar correção V12.1.5 da importação de texto.');
     document.head.appendChild(script);
   }
