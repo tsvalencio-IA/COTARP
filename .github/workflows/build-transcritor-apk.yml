@@ -1,0 +1,40 @@
+name: Build Transcritor APK
+on:
+  push:
+    branches: ["transcritor-apk-build"]
+    paths:
+      - 'transcritor-apk-src.b64.part*'
+      - '.github/workflows/build-transcritor-apk.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Expand project
+        run: |
+          cat transcritor-apk-src.b64.part1 transcritor-apk-src.b64.part2 transcritor-apk-src.b64.part3 transcritor-apk-src.b64.part4 > transcritor-apk-src.b64
+          base64 -d transcritor-apk-src.b64 > transcritor-apk-src.zip
+          rm -rf transcritor-apk
+          mkdir -p transcritor-apk
+          unzip -q transcritor-apk-src.zip -d transcritor-apk
+      - name: Build installable debug APK
+        working-directory: transcritor-apk
+        run: gradle assembleDebug --stacktrace
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Transcritor-IA-v1.0.0-debug
+          path: transcritor-apk/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
