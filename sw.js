@@ -1,15 +1,15 @@
 'use strict';
 
-const CACHE_VERSION = 'cotarp-pwa-v12.1.6';
+const CACHE_VERSION = 'cotarp-pwa-v12.1.7';
 const CORE_ASSETS = [
   './',
   './index.html',
-  './manifest.webmanifest?v=12.1.6',
+  './manifest-cotarp-v2.webmanifest?v=12.1.7',
   './config.js',
   './js/api.js',
   './js/comparador.js?v=12.1.2',
   './css/comparador.css?v=12.1.0',
-  './js/pwa.js?v=12.1.6',
+  './js/pwa.js?v=12.1.7',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/maskable-192.png',
