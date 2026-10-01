@@ -65,7 +65,7 @@
   async function registerServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
     try {
-      const registration = await navigator.serviceWorker.register('./sw.js', { scope: './' });
+      const registration = await navigator.serviceWorker.register('/COTARP/sw.js?v=12.1.6', { scope: '/COTARP/' });
       if (registration.waiting) registration.waiting.postMessage('SKIP_WAITING');
     } catch (error) {
       console.error('[SOS Orçamentos IA] Falha ao registrar Service Worker:', error);
