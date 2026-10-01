@@ -79,3 +79,10 @@ Ao usar **Levar menores ao orçamento**, o nome do fornecedor não é mais copia
 - Total geral de foto parcial só entra na conferência quando for compatível com a soma das linhas realmente lidas.
 - Respostas como "Monroe 287 / Nakata 220" passam a gerar duas alternativas independentes com marca e preço corretos.
 - O PDF e a tabela comparativa já suportam múltiplas alternativas do mesmo fornecedor para a mesma peça.
+
+
+## V12.1.9 — mapeamento técnico final
+
+- `CORREIA COMANDO (KIT C/TENSIONADOR)` passa a corresponder a KIT CORREIA DENTADA, e não à polia tensora.
+- `BUCHA BANDEJA ... (PARTE D)` e `(PARTE T)` são separadas entre dianteira e traseira.
+- `ELEMENTO FILTRO AR` não é mais assumido silenciosamente como filtro do A/C; fica para conferência quando a foto não disser cabine/ar-condicionado.
