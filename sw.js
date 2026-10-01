@@ -4,7 +4,7 @@ const CACHE_VERSION = 'cotarp-pwa-v12.1.8';
 const CORE_ASSETS = [
   './',
   './index.html',
-  './manifest-cotarp-v2.webmanifest?v=12.1.7',
+  './manifest-cotarp-v2.webmanifest?v=12.1.8',
   './config.js',
   './js/api.js',
   './js/comparador.js?v=12.1.2',
