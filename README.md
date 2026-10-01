@@ -65,3 +65,17 @@ Ao usar **Levar menores ao orçamento**, o nome do fornecedor não é mais copia
 - Não é obrigatório preencher os três fornecedores.
 - Abaixo de cada fornecedor salvo existem atalhos para continuar, analisar, gerar o PDF da comparação e abrir pedidos.
 - Uma barra rápida permanece próxima durante a rolagem.
+
+
+## V12.1.8 — fidelidade da cotação
+
+- A lista solicitada não funde mais linhas parecidas sem autorização: cada linha enviada pelo usuário permanece independente.
+- Corrigido o caso PIVÔ LD/LE e COXIM MOTOR LD/LE.
+- Correção de associação técnica para tensor da correia, bomba de combustível, bomba d'água, máquina de vidro, fechadura do capô e palhetas dianteira/traseira.
+- Itens sem lado informado não são mais jogados automaticamente em LD ou LE; ficam para conferência.
+- Upload de foto aceita múltiplas imagens no mesmo fornecedor e novas fotos podem ser adicionadas depois.
+- Leitura de visão ampliada para não truncar cotações longas.
+- A marca não aceita quantidade numérica como se fosse fabricante/marca.
+- Total geral de foto parcial só entra na conferência quando for compatível com a soma das linhas realmente lidas.
+- Respostas como "Monroe 287 / Nakata 220" passam a gerar duas alternativas independentes com marca e preço corretos.
+- O PDF e a tabela comparativa já suportam múltiplas alternativas do mesmo fornecedor para a mesma peça.
