@@ -11,14 +11,14 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\Transcritor IA
 DefaultGroupName={#MyAppName}
 OutputDir=installer_out
-OutputBaseFilename=TranscritorIA-Setup-v1.2.0
+OutputBaseFilename=TranscritorIA-Setup-v1.2.0-FIX
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-CloseApplications=yes
+CloseApplications=no
 RestartApplications=no
 UsePreviousAppDir=yes
 
@@ -66,16 +66,30 @@ begin
     Result := S;
 end;
 
+procedure ForceCloseOldTranscritor();
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM TranscritorIA.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(700);
+end;
+
 function InitializeSetup(): Boolean;
 var
   UninstallString: String;
   ResultCode: Integer;
 begin
   Result := True;
+
+  { Fecha primeiro qualquer versão antiga que esteja mantendo arquivos em uso. }
+  ForceCloseOldTranscritor();
+
+  { Depois remove a instalação anterior silenciosamente. }
   UninstallString := GetOldUninstallString();
   if UninstallString <> '' then
   begin
     StringChangeEx(UninstallString, '"', '', True);
     Exec(UninstallString, '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    Sleep(700);
   end;
 end;
