@@ -43,11 +43,67 @@ jobs:
         shell: pwsh
         run: choco install innosetup --no-progress -y
 
+      - name: Generate installer script
+        shell: pwsh
+        run: |
+          @'
+          #define MyAppName "Transcritor IA"
+          #define MyAppVersion "1.0.0"
+          #define MyAppPublisher "thIAguinho Soluções Digitais"
+          #define MyAppExeName "TranscritorIA.exe"
+
+          [Setup]
+          AppId={{D83C71C4-A4BE-4D69-9FC8-59D3C165918D}
+          AppName={#MyAppName}
+          AppVersion={#MyAppVersion}
+          AppPublisher={#MyAppPublisher}
+          DefaultDirName={autopf}\Transcritor IA
+          DefaultGroupName={#MyAppName}
+          OutputDir=installer_out
+          OutputBaseFilename=TranscritorIA-Setup-v1.0.0
+          Compression=lzma2
+          SolidCompression=yes
+          WizardStyle=modern
+          PrivilegesRequired=lowest
+          ArchitecturesAllowed=x64compatible
+          ArchitecturesInstallIn64BitMode=x64compatible
+
+          [Files]
+          Source: "dist\TranscritorIA.exe"; DestDir: "{app}"; Flags: ignoreversion
+
+          [Tasks]
+          Name: "desktopicon"; Description: "Criar atalho na Área de Trabalho"; GroupDescription: "Atalhos:"; Flags: unchecked
+
+          [Icons]
+          Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+          Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+          [Registry]
+          Root: HKCU; Subkey: "Software\Classes\Applications\{#MyAppExeName}\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
+          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp3\shell\TranscritorIA"; ValueType: string; ValueData: "Transcrever com Transcritor IA"; Flags: uninsdeletekey
+          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp3\shell\TranscritorIA\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
+          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.m4a\shell\TranscritorIA"; ValueType: string; ValueData: "Transcrever com Transcritor IA"; Flags: uninsdeletekey
+          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.m4a\shell\TranscritorIA\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
+          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.ogg\shell\TranscritorIA"; ValueType: string; ValueData: "Transcrever com Transcritor IA"; Flags: uninsdeletekey
+          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.ogg\shell\TranscritorIA\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
+          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.opus\shell\TranscritorIA"; ValueType: string; ValueData: "Transcrever com Transcritor IA"; Flags: uninsdeletekey
+          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.opus\shell\TranscritorIA\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
+          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.wav\shell\TranscritorIA"; ValueType: string; ValueData: "Transcrever com Transcritor IA"; Flags: uninsdeletekey
+          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.wav\shell\TranscritorIA\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
+          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp4\shell\TranscritorIA"; ValueType: string; ValueData: "Transcrever com Transcritor IA"; Flags: uninsdeletekey
+          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp4\shell\TranscritorIA\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
+          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webm\shell\TranscritorIA"; ValueType: string; ValueData: "Transcrever com Transcritor IA"; Flags: uninsdeletekey
+          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webm\shell\TranscritorIA\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
+
+          [Run]
+          Filename: "{app}\{#MyAppExeName}"; Description: "Abrir Transcritor IA"; Flags: nowait postinstall skipifsilent
+          '@ | Set-Content -Encoding UTF8 TranscritorIA-Windows/installer-fixed.iss
+
       - name: Build installer
         shell: pwsh
         run: |
           cd TranscritorIA-Windows
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer-fixed.iss
           if (!(Test-Path installer_out/TranscritorIA-Setup-v1.0.0.exe)) { throw "Installer not created" }
 
       - name: Verify EXEs
