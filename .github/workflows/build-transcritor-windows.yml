@@ -6,7 +6,7 @@ on:
     branches:
       - transcritor-windows-build
     paths:
-      - 'transcritor-windows-src.b64'
+      - 'transcritor-src-parts/**'
       - '.github/workflows/build-transcritor-windows.yml'
 
 jobs:
@@ -18,7 +18,10 @@ jobs:
       - name: Reconstruct source
         shell: pwsh
         run: |
-          $b64 = Get-Content -Raw transcritor-windows-src.b64
+          $parts = Get-ChildItem "transcritor-src-parts\tia11.part*" | Sort-Object Name
+          if ($parts.Count -ne 9) { throw "Expected 9 source parts, found $($parts.Count)" }
+          $b64 = ($parts | ForEach-Object { (Get-Content -Raw $_.FullName).Trim() }) -join ''
+          Write-Host "Base64 length: $($b64.Length)"
           [IO.File]::WriteAllBytes("transcritor-windows-source.zip", [Convert]::FromBase64String($b64))
           Expand-Archive transcritor-windows-source.zip -DestinationPath . -Force
           Get-ChildItem TranscritorIA-Windows
@@ -38,6 +41,9 @@ jobs:
         shell: pwsh
         run: |
           python -m py_compile TranscritorIA-Windows/transcritor_windows.py
+          node --check TranscritorIA-WhatsApp-Extension/content.js
+          node --check TranscritorIA-WhatsApp-Extension/page-hook.js
+          node --check TranscritorIA-WhatsApp-Extension/background.js
 
       - name: Build portable EXE
         shell: pwsh
