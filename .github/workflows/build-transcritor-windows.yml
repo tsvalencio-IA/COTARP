@@ -1,4 +1,5 @@
 name: Build Transcritor IA Windows
+
 on:
   workflow_dispatch:
   push:
@@ -19,8 +20,9 @@ jobs:
         run: |
           $b64 = Get-Content -Raw transcritor-windows-src.b64
           [IO.File]::WriteAllBytes("transcritor-windows-source.zip", [Convert]::FromBase64String($b64))
-          Expand-Archive transcritor-windows-source.zip -DestinationPath .
+          Expand-Archive transcritor-windows-source.zip -DestinationPath . -Force
           Get-ChildItem TranscritorIA-Windows
+          Get-ChildItem TranscritorIA-WhatsApp-Extension
 
       - uses: actions/setup-python@v5
         with:
@@ -31,6 +33,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r TranscritorIA-Windows/requirements.txt
+
+      - name: Validate source
+        shell: pwsh
+        run: |
+          python -m py_compile TranscritorIA-Windows/transcritor_windows.py
 
       - name: Build portable EXE
         shell: pwsh
@@ -43,81 +50,33 @@ jobs:
         shell: pwsh
         run: choco install innosetup --no-progress -y
 
-      - name: Generate installer script
-        shell: pwsh
-        run: |
-          @'
-          #define MyAppName "Transcritor IA"
-          #define MyAppVersion "1.0.0"
-          #define MyAppPublisher "thIAguinho Soluções Digitais"
-          #define MyAppExeName "TranscritorIA.exe"
-
-          [Setup]
-          AppId={{D83C71C4-A4BE-4D69-9FC8-59D3C165918D}
-          AppName={#MyAppName}
-          AppVersion={#MyAppVersion}
-          AppPublisher={#MyAppPublisher}
-          DefaultDirName={autopf}\Transcritor IA
-          DefaultGroupName={#MyAppName}
-          OutputDir=installer_out
-          OutputBaseFilename=TranscritorIA-Setup-v1.0.0
-          Compression=lzma2
-          SolidCompression=yes
-          WizardStyle=modern
-          PrivilegesRequired=lowest
-          ArchitecturesAllowed=x64compatible
-          ArchitecturesInstallIn64BitMode=x64compatible
-
-          [Files]
-          Source: "dist\TranscritorIA.exe"; DestDir: "{app}"; Flags: ignoreversion
-
-          [Tasks]
-          Name: "desktopicon"; Description: "Criar atalho na Área de Trabalho"; GroupDescription: "Atalhos:"; Flags: unchecked
-
-          [Icons]
-          Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-          Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
-
-          [Registry]
-          Root: HKCU; Subkey: "Software\Classes\Applications\{#MyAppExeName}\shell\open\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
-          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp3\shell\TranscritorIA"; ValueType: string; ValueData: "Transcrever com Transcritor IA"; Flags: uninsdeletekey
-          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp3\shell\TranscritorIA\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
-          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.m4a\shell\TranscritorIA"; ValueType: string; ValueData: "Transcrever com Transcritor IA"; Flags: uninsdeletekey
-          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.m4a\shell\TranscritorIA\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
-          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.ogg\shell\TranscritorIA"; ValueType: string; ValueData: "Transcrever com Transcritor IA"; Flags: uninsdeletekey
-          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.ogg\shell\TranscritorIA\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
-          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.opus\shell\TranscritorIA"; ValueType: string; ValueData: "Transcrever com Transcritor IA"; Flags: uninsdeletekey
-          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.opus\shell\TranscritorIA\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
-          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.wav\shell\TranscritorIA"; ValueType: string; ValueData: "Transcrever com Transcritor IA"; Flags: uninsdeletekey
-          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.wav\shell\TranscritorIA\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
-          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp4\shell\TranscritorIA"; ValueType: string; ValueData: "Transcrever com Transcritor IA"; Flags: uninsdeletekey
-          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mp4\shell\TranscritorIA\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
-          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webm\shell\TranscritorIA"; ValueType: string; ValueData: "Transcrever com Transcritor IA"; Flags: uninsdeletekey
-          Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.webm\shell\TranscritorIA\command"; ValueType: string; ValueData: """{app}\{#MyAppExeName}"" ""%1"""; Flags: uninsdeletekey
-
-          [Run]
-          Filename: "{app}\{#MyAppExeName}"; Description: "Abrir Transcritor IA"; Flags: nowait postinstall skipifsilent
-          '@ | Set-Content -Encoding UTF8 TranscritorIA-Windows/installer-fixed.iss
-
       - name: Build installer
         shell: pwsh
         run: |
           cd TranscritorIA-Windows
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer-fixed.iss
-          if (!(Test-Path installer_out/TranscritorIA-Setup-v1.0.0.exe)) { throw "Installer not created" }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+          if (!(Test-Path installer_out/TranscritorIA-Setup-v1.1.0.exe)) { throw "Installer not created" }
 
-      - name: Verify EXEs
+      - name: Package extension
+        shell: pwsh
+        run: |
+          Compress-Archive -Path TranscritorIA-WhatsApp-Extension -DestinationPath TranscritorIA-WhatsApp-Extension-v1.1.0.zip -Force
+
+      - name: Verify outputs
         shell: pwsh
         run: |
           Get-Item TranscritorIA-Windows/dist/TranscritorIA.exe | Format-List Name,Length,LastWriteTime
-          Get-Item TranscritorIA-Windows/installer_out/TranscritorIA-Setup-v1.0.0.exe | Format-List Name,Length,LastWriteTime
+          Get-Item TranscritorIA-Windows/installer_out/TranscritorIA-Setup-v1.1.0.exe | Format-List Name,Length,LastWriteTime
+          Get-Item TranscritorIA-WhatsApp-Extension-v1.1.0.zip | Format-List Name,Length,LastWriteTime
           Get-FileHash TranscritorIA-Windows/dist/TranscritorIA.exe -Algorithm SHA256
-          Get-FileHash TranscritorIA-Windows/installer_out/TranscritorIA-Setup-v1.0.0.exe -Algorithm SHA256
+          Get-FileHash TranscritorIA-Windows/installer_out/TranscritorIA-Setup-v1.1.0.exe -Algorithm SHA256
+          Get-FileHash TranscritorIA-WhatsApp-Extension-v1.1.0.zip -Algorithm SHA256
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TranscritorIA-Windows-v1.0.0
+          name: TranscritorIA-Windows-WhatsApp-v1.1.0
           path: |
             TranscritorIA-Windows/dist/TranscritorIA.exe
-            TranscritorIA-Windows/installer_out/TranscritorIA-Setup-v1.0.0.exe
+            TranscritorIA-Windows/installer_out/TranscritorIA-Setup-v1.1.0.exe
+            TranscritorIA-WhatsApp-Extension-v1.1.0.zip
           if-no-files-found: error
