@@ -1,0 +1,86 @@
+name: Build Transcritor IA Windows v1.2.0
+
+on:
+  push:
+    branches:
+      - transcritor-windows-build
+    paths:
+      - '.github/workflows/build-transcritor-windows-v12.yml'
+      - 'transcritor-v1.2.0-source.zip'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract source
+        shell: pwsh
+        run: |
+          Expand-Archive -Path "transcritor-v1.2.0-source.zip" -DestinationPath "." -Force
+          Get-ChildItem "TranscritorIA-v1.2.0\TranscritorIA-Windows"
+          Get-ChildItem "TranscritorIA-v1.2.0\TranscritorIA-WhatsApp-Extension"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r "TranscritorIA-v1.2.0\TranscritorIA-Windows\requirements.txt"
+
+      - name: Validate source
+        shell: pwsh
+        run: |
+          python -m py_compile "TranscritorIA-v1.2.0\TranscritorIA-Windows\transcritor_windows.py"
+          node --check "TranscritorIA-v1.2.0\TranscritorIA-WhatsApp-Extension\content.js"
+          node --check "TranscritorIA-v1.2.0\TranscritorIA-WhatsApp-Extension\background.js"
+          node --check "TranscritorIA-v1.2.0\TranscritorIA-WhatsApp-Extension\page-hook.js"
+
+      - name: Build portable EXE
+        shell: pwsh
+        run: |
+          cd "TranscritorIA-v1.2.0\TranscritorIA-Windows"
+          pyinstaller --noconfirm --clean --onefile --windowed --name TranscritorIA --collect-all imageio_ffmpeg --collect-all tkinterdnd2 --collect-all reportlab transcritor_windows.py
+          if (!(Test-Path "dist\TranscritorIA.exe")) { throw "Portable EXE not created" }
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: |
+          cd "TranscritorIA-v1.2.0\TranscritorIA-Windows"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+          if (!(Test-Path "installer_out\TranscritorIA-Setup-v1.2.0.exe")) { throw "Installer not created" }
+
+      - name: Package extension
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "TranscritorIA-v1.2.0\TranscritorIA-WhatsApp-Extension" -DestinationPath "TranscritorIA-WhatsApp-Extension-v1.2.0.zip" -Force
+
+      - name: Verify outputs
+        shell: pwsh
+        run: |
+          Get-Item "TranscritorIA-v1.2.0\TranscritorIA-Windows\dist\TranscritorIA.exe" | Format-List Name,Length,LastWriteTime
+          Get-Item "TranscritorIA-v1.2.0\TranscritorIA-Windows\installer_out\TranscritorIA-Setup-v1.2.0.exe" | Format-List Name,Length,LastWriteTime
+          Get-Item "TranscritorIA-WhatsApp-Extension-v1.2.0.zip" | Format-List Name,Length,LastWriteTime
+          Get-FileHash "TranscritorIA-v1.2.0\TranscritorIA-Windows\dist\TranscritorIA.exe" -Algorithm SHA256
+          Get-FileHash "TranscritorIA-v1.2.0\TranscritorIA-Windows\installer_out\TranscritorIA-Setup-v1.2.0.exe" -Algorithm SHA256
+          Get-FileHash "TranscritorIA-WhatsApp-Extension-v1.2.0.zip" -Algorithm SHA256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TranscritorIA-Windows-WhatsApp-v1.2.0
+          path: |
+            TranscritorIA-v1.2.0/TranscritorIA-Windows/dist/TranscritorIA.exe
+            TranscritorIA-v1.2.0/TranscritorIA-Windows/installer_out/TranscritorIA-Setup-v1.2.0.exe
+            TranscritorIA-WhatsApp-Extension-v1.2.0.zip
+          if-no-files-found: error
