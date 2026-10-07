@@ -71,7 +71,7 @@ jobs:
           name: TranscritorIA-Windows-v1.2.0
           path: |
             TranscritorIA-v1.2.0/TranscritorIA-Windows/dist/TranscritorIA.exe
-            TranscritorIA-v1.2.0/TranscritorIA-Windows/installer_out/TranscritorIA-Setup-v1.2.0.exe
+            TranscritorIA-v1.2.0/TranscritorIA-Windows/installer_out/TranscritorIA-Setup-v1.2.0-FIX.exe
             TranscritorIA-WhatsApp-Extension-v1.2.0.zip
           if-no-files-found: error
 
