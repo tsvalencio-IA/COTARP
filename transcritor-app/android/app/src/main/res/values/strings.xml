@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Transcritor IA</string>
+    <string name="accessibility_description">Mostra o botão Transcritor IA sobre o WhatsApp para transcrever mensagens de voz sem usar Compartilhar.</string>
+</resources>
