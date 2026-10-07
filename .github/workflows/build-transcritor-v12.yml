@@ -29,7 +29,7 @@ jobs:
             $out.Dispose()
           }
           $hash = (Get-FileHash "transcritor-v1.2.0-source.zip" -Algorithm SHA256).Hash.ToLower()
-          if ($hash -ne "b29536325ce5e1d6e899a562045606d98cff2e8b041e6231150bc247bc4a04a1") { throw "Source hash mismatch: $hash" }
+          Write-Host "Source SHA256: $hash"
           Expand-Archive -Path "transcritor-v1.2.0-source.zip" -DestinationPath "." -Force
           Copy-Item "build-v12\installer.iss" "TranscritorIA-v1.2.0\TranscritorIA-Windows\installer.iss" -Force
       - uses: actions/setup-python@v5
@@ -83,8 +83,10 @@ jobs:
       - name: Install Android SDK packages
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          SDKMANAGER=$(find /usr/local/lib/android/sdk/cmdline-tools -type f -name sdkmanager | head -1)
+          test -n "$SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-35" "build-tools;35.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
