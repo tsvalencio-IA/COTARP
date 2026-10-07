@@ -14,22 +14,17 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Reconstruct Windows source
+      - name: Reconstruct verified Windows source
         shell: pwsh
         run: |
-          $out = [IO.File]::Create("transcritor-v1.2.0-source.zip")
-          try {
-            0..3 | ForEach-Object {
-              $part = "v12-parts\source.part$($_)"
-              if (!(Test-Path $part)) { throw "Missing $part" }
-              $bytes = [IO.File]::ReadAllBytes($part)
-              $out.Write($bytes, 0, $bytes.Length)
-            }
-          } finally {
-            $out.Dispose()
-          }
+          $parts = Get-ChildItem "build-v12\source-b64\part*.txt" | Sort-Object Name
+          if ($parts.Count -ne 6) { throw "Expected 6 source parts, found $($parts.Count)" }
+          $b64 = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          if ($b64.Length -ne 31128) { throw "Unexpected base64 length: $($b64.Length)" }
+          [IO.File]::WriteAllBytes("transcritor-v1.2.0-source.zip", [Convert]::FromBase64String($b64))
           $hash = (Get-FileHash "transcritor-v1.2.0-source.zip" -Algorithm SHA256).Hash.ToLower()
           Write-Host "Source SHA256: $hash"
+          if ($hash -ne "b29536325ce5e1d6e899a562045606d98cff2e8b041e6231150bc247bc4a04a1") { throw "Source hash mismatch" }
           Expand-Archive -Path "transcritor-v1.2.0-source.zip" -DestinationPath "." -Force
           Copy-Item "build-v12\installer.iss" "TranscritorIA-v1.2.0\TranscritorIA-Windows\installer.iss" -Force
       - uses: actions/setup-python@v5
@@ -52,6 +47,7 @@ jobs:
         run: |
           cd "TranscritorIA-v1.2.0\TranscritorIA-Windows"
           pyinstaller --noconfirm --clean --onefile --windowed --name TranscritorIA --collect-all imageio_ffmpeg --collect-all tkinterdnd2 --collect-all reportlab transcritor_windows.py
+          if (!(Test-Path "dist\TranscritorIA.exe")) { throw "Portable EXE not created" }
       - name: Install Inno Setup
         shell: pwsh
         run: choco install innosetup --no-progress -y
@@ -60,9 +56,16 @@ jobs:
         run: |
           cd "TranscritorIA-v1.2.0\TranscritorIA-Windows"
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+          if (!(Test-Path "installer_out\TranscritorIA-Setup-v1.2.0.exe")) { throw "Installer not created" }
       - name: Package extension
         shell: pwsh
         run: Compress-Archive -Path "TranscritorIA-v1.2.0\TranscritorIA-WhatsApp-Extension\*" -DestinationPath "TranscritorIA-WhatsApp-Extension-v1.2.0.zip" -Force
+      - name: Verify outputs
+        shell: pwsh
+        run: |
+          Get-FileHash "TranscritorIA-v1.2.0\TranscritorIA-Windows\dist\TranscritorIA.exe" -Algorithm SHA256
+          Get-FileHash "TranscritorIA-v1.2.0\TranscritorIA-Windows\installer_out\TranscritorIA-Setup-v1.2.0.exe" -Algorithm SHA256
+          Get-FileHash "TranscritorIA-WhatsApp-Extension-v1.2.0.zip" -Algorithm SHA256
       - uses: actions/upload-artifact@v4
         with:
           name: TranscritorIA-Windows-v1.2.0
