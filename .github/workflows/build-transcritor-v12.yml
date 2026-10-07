@@ -56,7 +56,7 @@ jobs:
         run: |
           cd "TranscritorIA-v1.2.0\TranscritorIA-Windows"
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
-          if (!(Test-Path "installer_out\TranscritorIA-Setup-v1.2.0.exe")) { throw "Installer not created" }
+          if (!(Test-Path "installer_out\TranscritorIA-Setup-v1.2.0-FIX.exe")) { throw "Installer not created" }
       - name: Package extension
         shell: pwsh
         run: Compress-Archive -Path "TranscritorIA-v1.2.0\TranscritorIA-WhatsApp-Extension\*" -DestinationPath "TranscritorIA-WhatsApp-Extension-v1.2.0.zip" -Force
@@ -64,7 +64,7 @@ jobs:
         shell: pwsh
         run: |
           Get-FileHash "TranscritorIA-v1.2.0\TranscritorIA-Windows\dist\TranscritorIA.exe" -Algorithm SHA256
-          Get-FileHash "TranscritorIA-v1.2.0\TranscritorIA-Windows\installer_out\TranscritorIA-Setup-v1.2.0.exe" -Algorithm SHA256
+          Get-FileHash "TranscritorIA-v1.2.0\TranscritorIA-Windows\installer_out\TranscritorIA-Setup-v1.2.0-FIX.exe" -Algorithm SHA256
           Get-FileHash "TranscritorIA-WhatsApp-Extension-v1.2.0.zip" -Algorithm SHA256
       - uses: actions/upload-artifact@v4
         with:
