@@ -6,7 +6,7 @@ on:
       - transcritor-windows-build
     paths:
       - '.github/workflows/build-transcritor-windows-v12.yml'
-      - 'transcritor-v1.2.0-source.zip'
+      - 'v12-parts/**'
   workflow_dispatch:
 
 jobs:
@@ -16,9 +16,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract source
+      - name: Reconstruct and verify source
         shell: pwsh
         run: |
+          $out = [IO.File]::Create("transcritor-v1.2.0-source.zip")
+          try {
+            0..3 | ForEach-Object {
+              $part = "v12-parts\source.part$($_)"
+              if (!(Test-Path $part)) { throw "Missing $part" }
+              $bytes = [IO.File]::ReadAllBytes($part)
+              $out.Write($bytes, 0, $bytes.Length)
+            }
+          } finally {
+            $out.Dispose()
+          }
+          $hash = (Get-FileHash "transcritor-v1.2.0-source.zip" -Algorithm SHA256).Hash.ToLower()
+          Write-Host "Source SHA256: $hash"
+          if ($hash -ne "b29536325ce5e1d6e899a562045606d98cff2e8b041e6231150bc247bc4a04a1") {
+            throw "Source hash mismatch"
+          }
           Expand-Archive -Path "transcritor-v1.2.0-source.zip" -DestinationPath "." -Force
           Get-ChildItem "TranscritorIA-v1.2.0\TranscritorIA-Windows"
           Get-ChildItem "TranscritorIA-v1.2.0\TranscritorIA-WhatsApp-Extension"
@@ -63,7 +79,7 @@ jobs:
       - name: Package extension
         shell: pwsh
         run: |
-          Compress-Archive -Path "TranscritorIA-v1.2.0\TranscritorIA-WhatsApp-Extension" -DestinationPath "TranscritorIA-WhatsApp-Extension-v1.2.0.zip" -Force
+          Compress-Archive -Path "TranscritorIA-v1.2.0\TranscritorIA-WhatsApp-Extension\*" -DestinationPath "TranscritorIA-WhatsApp-Extension-v1.2.0.zip" -Force
 
       - name: Verify outputs
         shell: pwsh
